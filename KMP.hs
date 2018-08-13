@@ -3,9 +3,23 @@ module KMP where
 
 import Debug.Trace
 import Language.Haskell.TH.Lib
+import Language.Haskell.TH.Syntax
 import Language.Haskell.TH
 import qualified Data.Map as M
-import Control.Monad.State
+import Control.Monad.State hiding (lift)
+
+
+{-
+The difficulty with KMP is that it's a corecursive algorithm.
+
+This means that it's not possible stage naively and that the recursive call
+must be memoised in order to ensure termination of the code generation.
+
+This difficulty is highlighted by the TvL version where we end up in some contortion
+where everything becomes dynamic.
+
+
+-}
 
 type MemoTable a b = M.Map a (Code b)
 
@@ -21,7 +35,7 @@ memoise key call fcn = do
     Nothing ->
       return
         (Code [|| let f = $$(runCode $ run_memo fcn (M.insert key (Code [|| f ||]) table))
-                  in $$(runCode $ run_memo (call (Code [|| f ||])) table) ||])
+                  in $$(runCode $ uun_memo (call (Code [|| f ||])) table) ||])
 
 run_memo = evalState
 
@@ -112,31 +126,42 @@ makeTable' (x:xs) failure = KMP False test
 
 
 {-
-data KMPS a = KMPS { done_s :: Code Bool, next_s :: Code a -> Code (KMPS a) }
+This is corecursive so staging fails horribly
+-}
+
+data KMPS a = KMPS { done_s :: Code Bool, next_s :: Code a -> Code [a] -> Code Bool }
 
 kmp_tv_s :: String -> Code String -> Code Bool
-kmp_tv_s as bs = match (makeTable_s as) bs
-  where
-    match :: KMPS Char -> Code String -> Code Bool
-    match table s = Code [|| case $$(runCode s) of
-                                [] -> $$(runCode $ done_s table)
-                                (b:bs) -> $$(runCode $ done_s table)
-                                          || $$(runCode $ match (next_s table (Code [|| b ||])) (Code [|| bs ||])) ||]
+kmp_tv_s as bs = match_s (makeTable_s as) bs
+
+match_s :: KMPS Char -> Code String -> Code Bool
+match_s table s = Code [|| case $$(runCode s) of
+                            [] -> $$(runCode $ done_s table)
+                            (b:bs) -> $$(runCode $ done_s table)
+                                      || $$(runCode (next_s table (Code [|| b ||]) (Code [|| bs ||]))) ||]
 
 makeTable_s :: String -> KMPS Char
 makeTable_s xs = table
-  where table = makeTable'_s xs (const table)
+  where table = makeTable'_s xs (next_s table)
 
 true = Code [|| True ||]
 false = Code [|| False ||]
 
-makeTable'_s :: String -> (Code a -> KMPS a) -> KMPS Char
+liftT :: Lift a => a -> Code a
+liftT = Code . unsafeTExpCoerce . lift
+
+
+
+makeTable'_s :: String -> (Code Char -> Code [Char] -> Code Bool) -> KMPS Char
 makeTable'_s [] failure = KMPS true failure
 makeTable'_s (x:xs) failure = KMPS false test
-  where test :: Code Char -> Code (KMPS Char)
-        test c = if c == x then success else failure c
-        success = makeTable'_s xs (next (failure x))
--}
+  where test :: Code Char -> Code String -> Code Bool
+        test c cs =
+          let success = match_s (makeTable'_s xs (\_ xs -> failure ((liftT x)) xs)) cs
+          in
+          Code $ do
+             runIO (putStrLn (x:xs))
+             [|| if $$(runCode c) == x then $$(runCode success) else $$(runCode $ failure c cs) ||]
 
 
 
