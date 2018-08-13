@@ -35,7 +35,7 @@ memoise key call fcn = do
     Nothing ->
       return
         (Code [|| let f = $$(runCode $ run_memo fcn (M.insert key (Code [|| f ||]) table))
-                  in $$(runCode $ uun_memo (call (Code [|| f ||])) table) ||])
+                  in $$(runCode $ run_memo (call (Code [|| f ||])) table) ||])
 
 run_memo = evalState
 
