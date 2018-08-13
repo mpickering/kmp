@@ -92,6 +92,53 @@ search_s pat = Code [|| \s -> $$(runCode $ init_memo (go pat (Code [|| s ||]) pa
                                          (_:ss) -> search op os ||])
                                          -}
 
+data KMP a = KMP { done :: Bool, next :: a -> KMP a }
+
+
+kmp_tv :: String -> String -> Bool
+kmp_tv as bs = match (makeTable as) bs
+  where
+    match table [] = done table
+    match table (b:bs) = done table || match (next table b) bs
+
+makeTable :: String -> KMP Char
+makeTable xs = table
+  where table = makeTable' xs (const table)
+
+makeTable' [] failure = KMP True failure
+makeTable' (x:xs) failure = KMP False test
+  where test c = if c == x then success else failure c
+        success = makeTable' xs (next (failure x))
+
+
+{-
+data KMPS a = KMPS { done_s :: Code Bool, next_s :: Code a -> Code (KMPS a) }
+
+kmp_tv_s :: String -> Code String -> Code Bool
+kmp_tv_s as bs = match (makeTable_s as) bs
+  where
+    match :: KMPS Char -> Code String -> Code Bool
+    match table s = Code [|| case $$(runCode s) of
+                                [] -> $$(runCode $ done_s table)
+                                (b:bs) -> $$(runCode $ done_s table)
+                                          || $$(runCode $ match (next_s table (Code [|| b ||])) (Code [|| bs ||])) ||]
+
+makeTable_s :: String -> KMPS Char
+makeTable_s xs = table
+  where table = makeTable'_s xs (const table)
+
+true = Code [|| True ||]
+false = Code [|| False ||]
+
+makeTable'_s :: String -> (Code a -> KMPS a) -> KMPS Char
+makeTable'_s [] failure = KMPS true failure
+makeTable'_s (x:xs) failure = KMPS false test
+  where test :: Code Char -> Code (KMPS Char)
+        test c = if c == x then success else failure c
+        success = makeTable'_s xs (next (failure x))
+-}
+
+
 
 up ::  (Code a -> Code b) -> Code (a -> b)
 up f = Code [|| \a -> $$(runCode $ f (Code [|| a ||])) ||]
