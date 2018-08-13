@@ -5,13 +5,13 @@ let
   inherit (nixpkgs) pkgs;
 
   f = { mkDerivation, base, containers, mtl, stdenv
-      , template-haskell
+      , template-haskell, MemoTrie
       }:
       mkDerivation {
         pname = "kmp";
         version = "0.1.0.0";
         src = ./.;
-        libraryHaskellDepends = [ base containers mtl template-haskell ];
+        libraryHaskellDepends = [ base containers mtl template-haskell MemoTrie ];
         license = stdenv.lib.licenses.bsd3;
       };
 

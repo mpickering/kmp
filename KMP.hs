@@ -1,4 +1,5 @@
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE BangPatterns  #-}
 module KMP where
 
 import Debug.Trace
@@ -7,6 +8,8 @@ import Language.Haskell.TH.Syntax
 import Language.Haskell.TH
 import qualified Data.Map as M
 import Control.Monad.State hiding (lift)
+
+import Debug.Trace
 
 
 {-
@@ -141,8 +144,8 @@ match_s table s = Code [|| case $$(runCode s) of
                                       || $$(runCode (next_s table (Code [|| b ||]) (Code [|| bs ||]))) ||]
 
 makeTable_s :: String -> KMPS Char
-makeTable_s xs = table
-  where table = makeTable'_s xs (next_s table)
+makeTable_s xs = init_memo table
+  where table = mfix (\a -> (makeTable'_s xs (\s -> next_s a)))
 
 true = Code [|| True ||]
 false = Code [|| False ||]
@@ -150,23 +153,38 @@ false = Code [|| False ||]
 liftT :: Lift a => a -> Code a
 liftT = Code . unsafeTExpCoerce . lift
 
+type M a = State (M.Map String (Code Char -> Code String -> Code Bool)) a
+
+type S = M.Map String (Code Char -> Code String -> Code Bool)
 
 
-makeTable'_s :: String -> (Code Char -> Code [Char] -> Code Bool) -> KMPS Char
-makeTable'_s [] failure = KMPS true failure
-makeTable'_s (x:xs) failure = KMPS false test
-  where test :: Code Char -> Code String -> Code Bool
-        test c cs =
-          let success = match_s (makeTable'_s xs (\_ xs -> failure ((liftT x)) xs)) cs
+
+
+makeTable'_s :: String -> (S -> Code Char -> Code [Char] -> Code Bool) -> M (KMPS Char)
+makeTable'_s [] failure = get >>= \s -> return $ KMPS true (failure s)
+makeTable'_s pat@(x:xs) failure = do
+    s <- get
+    !_ <- traceShowM (M.keys s)
+    !_ <- traceShowM ("pat", pat)
+    case M.lookup pat s of
+      Just f -> return $ KMPS false f
+      Nothing -> return $ KMPS false
+        (down2 $ Code [|| let f c cs = $$(runCode $ test (M.insert pat (down2 $ Code [|| f ||])s) (Code [|| c ||]) (Code [|| cs ||]))
+                  in f ||])
+  where test :: S -> Code Char -> Code String -> Code Bool
+        test s c cs =
+          let success = match_s (resume s $ makeTable'_s xs (\s _ xs -> failure s (liftT x) xs)) cs
           in
           Code $ do
              runIO (putStrLn (x:xs))
-             [|| if $$(runCode c) == x then $$(runCode success) else $$(runCode $ failure c cs) ||]
+             [|| if $$(runCode c) == x then $$(runCode success) else $$(runCode $ failure s c cs) ||]
 
 
 
 up ::  (Code a -> Code b) -> Code (a -> b)
 up f = Code [|| \a -> $$(runCode $ f (Code [|| a ||])) ||]
+
+up2 f = Code [|| \a b -> $$(runCode $ f (Code [|| a ||]) (Code [|| b ||])) ||]
 
 down  :: Code (a -> b) -> Code a -> Code b
 down (Code f) (Code a) = Code [|| $$(f) $$(a) ||]
